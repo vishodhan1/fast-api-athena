@@ -56,7 +56,19 @@ async def get_all_activity_metadata():
 @app.get("/behaviour_metadata/")
 async def get_all_behaviour_metadata():
     collection = db["behaviour_metadata"]
-    documents = list(collection.find({}, {"_id": 0}))
+    print("collection is 123 ", collection)
+    documents = list(collection.find())
+    print("docuemnt is 123 ", documents)
+    return documents
+
+
+@app.get("/athena/{collection_name}/")
+async def get_documents_from_collection(collection_name: str):
+    if collection_name not in await db.list_collection_names():
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    collection = db[collection_name]
+    documents = await collection.find().to_list(None)
     return documents
 
 
