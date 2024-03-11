@@ -1,16 +1,24 @@
+import json
+
+import motor as motor
 import uvicorn as uvicorn
+from bson import ObjectId, json_util
 from fastapi import FastAPI, HTTPException, APIRouter, Request
+import motor.motor_asyncio
+from bson.json_util import dumps
 
 from pymongo import MongoClient
 from pydantic import BaseModel, Field
 import os
 import datetime
 
-
 app = FastAPI()
 
 # MongoDB setup
-client = MongoClient('mongodb://localhost:27017/')
+# client = MongoClient('mongodb://localhost:27017/')
+# db = client.metadata_db
+
+client = motor.motor_asyncio.AsyncIOMotorClient('mongodb://localhost:27017/')
 db = client.metadata_db
 
 
@@ -35,54 +43,20 @@ class BehaviourMetadata(BaseModel):
     modifiedBy: str
 
 
-@app.post("/activity_metadata/")
-async def insert_activity_metadata(metadata: ActivityMetadata):
-    collection = db.activity_metadata
-    result = collection.insert_one(metadata.dict())
-    return {"_id": str(result.inserted_id)}
+def serialize_doc(doc):
+    """Convert MongoDB document to a JSON-serializable format."""
+    doc["_id"] = str(doc["_id"])
+    return doc
 
 
-@app.post("/behaviour_metadata/")
-async def insert_behaviour_metadata(metadata: BehaviourMetadata):
-    collection = db.behaviour_metadata
-    result = collection.insert_one(metadata.dict())
-    return {"_id": str(result.inserted_id)}
-
-
-@app.get("/activity_metadata/")
-async def get_all_activity_metadata():
-    collection = db["activity_metadata"]
-    documents = list(collection.find({}, {"_id": 0}))
-    return documents
-
-
-@app.get("/behaviour_metadata/")
-async def get_all_behaviour_metadata():
-    collection = db["behaviour_metadata"]
-    print("behaviour_metadata collection", collection)
-    print("_____________________________________")
-    documents = list(collection.find({}, {"_id": 0}))
-    print("behaviour_metadata doc", documents)
-    return documents
-
-
-@app.delete("/{collection_name}/")
-async def delete_all_documents(collection_name: str):
-    if collection_name not in db.list_collection_names():
-        raise HTTPException(status_code=404, detail=f"Collection '{collection_name}' not found")
-
-    collection = db[collection_name]
-    result = collection.delete_many({})
-    return {"message": f"Deleted {result.deleted_count} documents from {collection_name}."}
-
-
-@app.post("/athena/experience_config_data/")
+# using moto library
+@app.post("/athena/save_experience_config/")
 async def fetch_data(request: Request):
     request_body = await request.json()
     response_data = {}
 
     for json_key, value in request_body.items():
-        collection_name = json_key + "_metadata"
+        collection_name = f"{json_key}_metadata"
         collection = db[collection_name]
 
         if value.lower() == "all":
@@ -92,7 +66,10 @@ async def fetch_data(request: Request):
             query = {json_key: {"$in": elements}}
             cursor = collection.find(query)
 
-        documents = await cursor.to_list(length=None)
+        documents = []
+        async for document in cursor:
+            documents.append(serialize_doc(document))
+
         response_data[collection_name] = documents
 
     if response_data:
@@ -104,6 +81,34 @@ async def fetch_data(request: Request):
         await experience_config_collection.insert_one(insert_data)
 
     return response_data
+
+
+# if motor library is not using then follow this approach to fetch any collection
+@app.get("/athena/{collection_name}/")
+async def get_documents_from_collection(collection_name: str):
+    if collection_name not in await db.list_collection_names():
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    collection = db[collection_name]
+    documents = await collection.find().to_list(None)
+    return documents
+
+
+# using moto library for fetching any collection
+@app.get("/athena/{collection_name}")
+async def experience_config_data(collection_name: str):
+    collection = db[collection_name]
+    documents = []
+    cursor = collection.find({})
+
+    async for document in cursor:
+        documents.append(document)
+
+    documents_json = json.loads(json_util.dumps(documents))
+    return documents_json
+
+
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
