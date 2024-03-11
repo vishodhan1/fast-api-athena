@@ -1,8 +1,11 @@
 import uvicorn as uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, APIRouter, Request
+
 from pymongo import MongoClient
 from pydantic import BaseModel, Field
 import os
+import datetime
+
 
 app = FastAPI()
 
@@ -56,19 +59,10 @@ async def get_all_activity_metadata():
 @app.get("/behaviour_metadata/")
 async def get_all_behaviour_metadata():
     collection = db["behaviour_metadata"]
-    print("collection is 123 ", collection)
-    documents = list(collection.find())
-    print("docuemnt is 123 ", documents)
-    return documents
-
-
-@app.get("/athena/{collection_name}/")
-async def get_documents_from_collection(collection_name: str):
-    if collection_name not in await db.list_collection_names():
-        raise HTTPException(status_code=404, detail="Collection not found")
-
-    collection = db[collection_name]
-    documents = await collection.find().to_list(None)
+    print("behaviour_metadata collection", collection)
+    print("_____________________________________")
+    documents = list(collection.find({}, {"_id": 0}))
+    print("behaviour_metadata doc", documents)
     return documents
 
 
@@ -81,6 +75,35 @@ async def delete_all_documents(collection_name: str):
     result = collection.delete_many({})
     return {"message": f"Deleted {result.deleted_count} documents from {collection_name}."}
 
+
+@app.post("/athena/experience_config_data/")
+async def fetch_data(request: Request):
+    request_body = await request.json()
+    response_data = {}
+
+    for json_key, value in request_body.items():
+        collection_name = json_key + "_metadata"
+        collection = db[collection_name]
+
+        if value.lower() == "all":
+            cursor = collection.find({})
+        else:
+            elements = value.split(',')
+            query = {json_key: {"$in": elements}}
+            cursor = collection.find(query)
+
+        documents = await cursor.to_list(length=None)
+        response_data[collection_name] = documents
+
+    if response_data:
+        experience_config_collection = db['experience_config']
+        insert_data = {
+            "data": response_data,
+            "timestamp": datetime.datetime.utcnow()
+        }
+        await experience_config_collection.insert_one(insert_data)
+
+    return response_data
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
