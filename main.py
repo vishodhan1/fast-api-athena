@@ -127,7 +127,6 @@ async def upload_csv(file: UploadFile = File(...)):
         print("row", row)
         print(df.iterrows() )
         document_name = row.get('DocumentName', '')
-        city = document_name.split('-')[0] if document_name else ''
 
         # Ensuring proper handling of potential NaN values
         zip_code = row.get('postalCode', '')
@@ -135,23 +134,25 @@ async def upload_csv(file: UploadFile = File(...)):
 
         city_value = row.get('city', '')
         city_value = None if pd.isna(city_value) else city_value
-
+        uniqueTitle = row.get("uniqueTitle", "")
         document = {
             "_id": str(uuid.uuid4()),
-            "uniqueTitle": city,
-            "contentReferenceId": f"CITY_{city.upper().replace(' ', '_')}",
+            "uniqueTitle": uniqueTitle,
+            "contentReferenceId": f"{row.get('AthenaType', '')}_{uniqueTitle}",
             "contentType": row.get('Type', 'UNKNOWN'),
             "zip": zip_code,
             "city": city_value,
             "state": row.get('state', ''),
+            "score": row.get('score', ''),
             "country": row.get('country', ''),
             "region": row.get('region', ''),
             "continent": row.get('continent', ''),
+            "parentId": row.get('parentId', ''),
             "satelliteCities": [city.strip() for city in row.get('satelliteCities', '').split(',')] if isinstance(row.get('satelliteCities'), str) else [],
             "latLong": {"longitude": "", "latitude": ""},
             "createdBy": "Joe Black",
-            "createdDate": datetime.utcnow(),
-            "lastModifiedDate": datetime.utcnow(),
+            "createdDate": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "lastModifiedDate": datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
             "modifiedBy": "joeJ@mondee.com"
         }
         records.append(document)
