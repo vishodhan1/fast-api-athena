@@ -124,6 +124,8 @@ async def upload_csv(file: UploadFile = File(...)):
 
     records = []
     for _, row in df.iterrows():
+        print("row", row)
+        print(df.iterrows() )
         document_name = row.get('DocumentName', '')
         city = document_name.split('-')[0] if document_name else ''
 
@@ -145,6 +147,7 @@ async def upload_csv(file: UploadFile = File(...)):
             "country": row.get('country', ''),
             "region": row.get('region', ''),
             "continent": row.get('continent', ''),
+            "satelliteCities": [city.strip() for city in row.get('satelliteCities', '').split(',')] if isinstance(row.get('satelliteCities'), str) else [],
             "latLong": {"longitude": "", "latitude": ""},
             "createdBy": "Joe Black",
             "createdDate": datetime.utcnow(),
