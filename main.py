@@ -124,8 +124,6 @@ async def upload_csv(file: UploadFile = File(...)):
 
     records = []
     for _, row in df.iterrows():
-        print("row", row)
-        print(df.iterrows() )
         document_name = row.get('DocumentName', '')
 
         # Ensuring proper handling of potential NaN values
