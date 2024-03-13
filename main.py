@@ -1,16 +1,20 @@
 import json
+import uuid
 
 import motor as motor
 import uvicorn as uvicorn
 from bson import ObjectId, json_util
-from fastapi import FastAPI, HTTPException, APIRouter, Request
+from fastapi import FastAPI, HTTPException, APIRouter, Request, UploadFile, File
 import motor.motor_asyncio
 from bson.json_util import dumps
+import pandas as pd
+from io import StringIO
+from datetime import datetime
+
 
 from pymongo import MongoClient
 from pydantic import BaseModel, Field
 import os
-import datetime
 
 app = FastAPI()
 
@@ -71,7 +75,7 @@ async def fetch_data(request: Request):
             documents.append(serialize_doc(document))
 
         response_data[collection_name] = documents
-
+    import datetime
     if response_data:
         experience_config_collection = db['experience_config']
         insert_data = {
@@ -84,20 +88,22 @@ async def fetch_data(request: Request):
 
 
 # if motor library is not using then follow this approach to fetch any collection
-@app.get("/athena/{collection_name}/")
-async def get_documents_from_collection(collection_name: str):
-    if collection_name not in await db.list_collection_names():
-        raise HTTPException(status_code=404, detail="Collection not found")
-
-    collection = db[collection_name]
-    documents = await collection.find().to_list(None)
-    return documents
+# @app.get("/athena/{collection_name}/")
+# async def get_documents_from_collection(collection_name: str):
+#     if collection_name not in await db.list_collection_names():
+#         raise HTTPException(status_code=404, detail="Collection not found")
+#
+#     collection = db[collection_name]
+#     documents = await collection.find().to_list(None)
+#     return documents
 
 
 # using moto library for fetching any collection
 @app.get("/athena/{collection_name}")
 async def experience_config_data(collection_name: str):
+    print("hi from athena")
     collection = db[collection_name]
+    print("collection", collection)
     documents = []
     cursor = collection.find({})
 
@@ -108,6 +114,66 @@ async def experience_config_data(collection_name: str):
     return documents_json
 
 
+@app.post("/athena/upload-csv/")
+async def upload_csv(file: UploadFile = File(...)):
+    if file.content_type != 'text/csv':
+        raise HTTPException(status_code=400, detail="File must be a CSV.")
+    collection = db["content_metadata"]
+    content = await file.read()
+    df = pd.read_csv(StringIO(str(content, 'utf-8')))
+
+    records = []
+    for _, row in df.iterrows():
+        document_name = row.get('DocumentName', '')
+        city = document_name.split('-')[0] if document_name else ''
+
+        # Ensuring proper handling of potential NaN values
+        zip_code = row.get('postalCode', '')
+        zip_code = None if pd.isna(zip_code) else zip_code
+
+        city_value = row.get('city', '')
+        city_value = None if pd.isna(city_value) else city_value
+
+        document = {
+            "_id": str(uuid.uuid4()),
+            "uniqueTitle": city,
+            "contentReferenceId": f"CITY_{city.upper().replace(' ', '_')}",
+            "contentType": row.get('Type', 'UNKNOWN'),
+            "zip": zip_code,
+            "city": city_value,
+            "state": row.get('state', ''),
+            "country": row.get('country', ''),
+            "region": row.get('region', ''),
+            "continent": row.get('continent', ''),
+            "latLong": {"longitude": "", "latitude": ""},
+            "createdBy": "Joe Black",
+            "createdDate": datetime.utcnow(),
+            "lastModifiedDate": datetime.utcnow(),
+            "modifiedBy": "joeJ@mondee.com"
+        }
+        records.append(document)
+
+    if records:
+        collection.insert_many(records)
+        return {"message": f"{len(records)} documents inserted into content_metadata."}
+    else:
+        return {"message": "No data found in the CSV file."}
+
+
+@app.delete("/delete-all/{collection_name}/")
+async def delete_all_documents(collection_name: str):
+    # Check if the collection exists to prevent errors
+    if collection_name not in await db.list_collection_names():
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    try:
+        # Access the collection
+        collection = db[collection_name]
+        result = await collection.delete_many({})
+
+        return {"message": f"Successfully deleted {result.deleted_count} documents from '{collection_name}'."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
